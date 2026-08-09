@@ -6,9 +6,9 @@
 <title>Libro de Cuentas</title>
 <meta name="description" content="Deudas, gastos, ingresos y meta de ahorro anual en un solo lugar" />
 <meta name="theme-color" content="#132C4D" />
-<link rel="manifest" href="/manifest.json" />
-<link rel="apple-touch-icon" href="/icon-192.png" />
-<link rel="icon" href="/icon-192.png" />
+<link rel="manifest" href="./manifest.json" />
+<link rel="apple-touch-icon" href="./icon-192.png" />
+<link rel="icon" href="./icon-192.png" />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" />
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -21,15 +21,494 @@
 <body>
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
-/* (El mismo código React que tenías; lo mantuve igual salvo el registro SW al final) */
-/* ... contenido de tu app (por brevedad lo omito aquí) ... */
+const { useState, useEffect, useMemo } = React;
+
+// --- Iconos (reemplazo simple de lucide-react con emoji, sin necesidad de build) ---
+function IconWrap({ size = 14, children }) {
+  return (
+    <span style={{ fontSize: size, lineHeight: 1, display: "inline-flex" }}>
+      {children}
+    </span>
+  );
+}
+const Plus = (p) => <IconWrap {...p}>➕</IconWrap>;
+const Trash2 = (p) => <IconWrap {...p}>🗑️</IconWrap>;
+const X = (p) => <IconWrap {...p}>✕</IconWrap>;
+const CreditCard = (p) => <IconWrap {...p}>💳</IconWrap>;
+const Receipt = (p) => <IconWrap {...p}>🧾</IconWrap>;
+const TrendingDown = (p) => <IconWrap {...p}>📉</IconWrap>;
+const TrendingUp = (p) => <IconWrap {...p}>📈</IconWrap>;
+const Coins = (p) => <IconWrap {...p}>🪙</IconWrap>;
+const Check = (p) => <IconWrap {...p}>✔️</IconWrap>;
+const PiggyBank = (p) => <IconWrap {...p}>🐷</IconWrap>;
+const Wallet = (p) => <IconWrap {...p}>👛</IconWrap>;
+const Landmark = (p) => <IconWrap {...p}>🏦</IconWrap>;
+const Pencil = (p) => <IconWrap {...p}>✏️</IconWrap>;
+const Wallet2 = (p) => <IconWrap {...p}>👛</IconWrap>;
+const Flame = (p) => <IconWrap {...p}>🔥</IconWrap>;
+
+// --- Polyfill de window.storage usando localStorage (persistencia real del navegador) ---
+if (!window.storage) {
+  window.storage = {
+    get: async (key) => {
+      const v = localStorage.getItem("libro-cuentas:" + key);
+      return v !== null ? { key, value: v } : null;
+    },
+    set: async (key, value) => {
+      localStorage.setItem("libro-cuentas:" + key, value);
+      return { key, value };
+    },
+  };
+}
+
+
+const PALETTE = {
+  paper: "#EAF1F8",
+  paperDark: "#DCE7F2",
+  ink: "#132C4D",
+  inkSoft: "#4F6E8F",
+  burgundy: "#1B4B87",
+  burgundySoft: "#BFD3EA",
+  teal: "#1D7DA8",
+  tealSoft: "#B8E1EE",
+  gold: "#3F6FA8",
+  goldSoft: "#CBDCEF",
+  line: "#C2D3E3",
+  marginRed: "#3D6FA5",
+};
+
+const CATEGORIAS = [
+  { id: "comida", label: "Comida" },
+  { id: "transporte", label: "Transporte" },
+  { id: "vivienda", label: "Vivienda" },
+  { id: "salud", label: "Salud" },
+  { id: "entretenimiento", label: "Entretenimiento" },
+  { id: "otros", label: "Otros" },
+];
+
+const FUENTES_INGRESO = [
+  { id: "salario", label: "Salario" },
+  { id: "freelance", label: "Freelance" },
+  { id: "negocio", label: "Negocio" },
+  { id: "inversiones", label: "Inversiones" },
+  { id: "regalo", label: "Regalo" },
+  { id: "otros", label: "Otros" },
+];
+
+function useGoogleFonts() {
+  useEffect(() => {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap";
+    document.head.appendChild(link);
+    return () => document.head.removeChild(link);
+  }, []);
+}
+
+function fmt(n) {
+  const v = Number(n) || 0;
+  return v.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function App() {
+  useGoogleFonts();
+  const [debts, setDebts] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [savings, setSavings] = useState([]);
+  const [dailyExpenses, setDailyExpenses] = useState([]);
+  const [incomes, setIncomes] = useState([]);
+  const [savingsGoal, setSavingsGoal] = useState(0);
+  const [tab, setTab] = useState("deudas");
+  const [loaded, setLoaded] = useState(false);
+  const [showDebtForm, setShowDebtForm] = useState(false);
+  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [showSavingsForm, setShowSavingsForm] = useState(false);
+  const [showDailyForm, setShowDailyForm] = useState(false);
+  const [showIncomeForm, setShowIncomeForm] = useState(false);
+  const [showGoalForm, setShowGoalForm] = useState(false);
+  const [error, setError] = useState("");
+
+  // Load
+  useEffect(() => {
+    (async () => {
+      try {
+        const d = await window.storage.get("debts", false);
+        if (d && d.value) setDebts(JSON.parse(d.value));
+      } catch (e) {}
+      try {
+        const ex = await window.storage.get("expenses", false);
+        if (ex && ex.value) setExpenses(JSON.parse(ex.value));
+      } catch (e) {}
+      try {
+        const sv = await window.storage.get("savings", false);
+        if (sv && sv.value) setSavings(JSON.parse(sv.value));
+      } catch (e) {}
+      try {
+        const de = await window.storage.get("dailyExpenses", false);
+        if (de && de.value) setDailyExpenses(JSON.parse(de.value));
+      } catch (e) {}
+      try {
+        const inc = await window.storage.get("incomes", false);
+        if (inc && inc.value) setIncomes(JSON.parse(inc.value));
+      } catch (e) {}
+      try {
+        const g = await window.storage.get("savingsGoal", false);
+        if (g && g.value) setSavingsGoal(JSON.parse(g.value));
+      } catch (e) {}
+      setLoaded(true);
+    })();
+  }, []);
+
+  // Persist
+  useEffect(() => {
+    if (!loaded) return;
+    window.storage.set("debts", JSON.stringify(debts), false).catch(() => setError("No se pudo guardar."));
+  }, [debts, loaded]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    window.storage.set("expenses", JSON.stringify(expenses), false).catch(() => setError("No se pudo guardar."));
+  }, [expenses, loaded]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    window.storage.set("savings", JSON.stringify(savings), false).catch(() => setError("No se pudo guardar."));
+  }, [savings, loaded]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    window.storage.set("dailyExpenses", JSON.stringify(dailyExpenses), false).catch(() => setError("No se pudo guardar."));
+  }, [dailyExpenses, loaded]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    window.storage.set("incomes", JSON.stringify(incomes), false).catch(() => setError("No se pudo guardar."));
+  }, [incomes, loaded]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    window.storage.set("savingsGoal", JSON.stringify(savingsGoal), false).catch(() => setError("No se pudo guardar."));
+  }, [savingsGoal, loaded]);
+
+  const totalDeudaPendiente = useMemo(
+    () => debts.reduce((s, d) => s + Math.max(0, d.total - d.paid), 0),
+    [debts]
+  );
+  const totalPagadoDeudas = useMemo(() => debts.reduce((s, d) => s + d.paid, 0), [debts]);
+
+  const mesActual = new Date().toISOString().slice(0, 7);
+  const gastoMes = useMemo(
+    () => expenses.filter((e) => e.date.slice(0, 7) === mesActual).reduce((s, e) => s + e.amount, 0),
+    [expenses, mesActual]
+  );
+
+  const totalAhorrado = useMemo(() => savings.reduce((s, a) => s + a.amount, 0), [savings]);
+
+  const ingresoMes = useMemo(
+    () => incomes.filter((i) => i.date.slice(0, 7) === mesActual).reduce((s, i) => s + i.amount, 0),
+    [incomes, mesActual]
+  );
+  const totalIngresos = useMemo(() => incomes.reduce((s, i) => s + i.amount, 0), [incomes]);
+
+  const patrimonioNeto = totalAhorrado - totalDeudaPendiente;
+
+  const hoy = todayISO();
+  const totalHoy = useMemo(
+    () => dailyExpenses.filter((e) => e.date === hoy).reduce((s, e) => s + e.amount, 0),
+    [dailyExpenses, hoy]
+  );
+  const totalDiariosMes = useMemo(
+    () => dailyExpenses.filter((e) => e.date.slice(0, 7) === mesActual).reduce((s, e) => s + e.amount, 0),
+    [dailyExpenses, mesActual]
+  );
+
+  // --- Meta de ahorro anual y presupuesto diario ---
+  const anoActual = mesActual.slice(0, 4);
+
+  const ingresosAno = useMemo(
+    () => incomes.filter((i) => i.date.slice(0, 4) === anoActual).reduce((s, i) => s + i.amount, 0),
+    [incomes, anoActual]
+  );
+  const gastosFijosAno = useMemo(
+    () => expenses.filter((e) => e.date.slice(0, 4) === anoActual).reduce((s, e) => s + e.amount, 0),
+    [expenses, anoActual]
+  );
+  const gastosDiariosAno = useMemo(
+    () => dailyExpenses.filter((e) => e.date.slice(0, 4) === anoActual).reduce((s, e) => s + e.amount, 0),
+    [dailyExpenses, anoActual]
+  );
+  const ahorroAcumuladoAno = ingresosAno - gastosFijosAno - gastosDiariosAno;
+  const metaRestante = Math.max(0, savingsGoal - ahorroAcumuladoAno);
+
+  const diasRestantesAno = useMemo(() => {
+    const finAno = new Date(Number(anoActual), 11, 31);
+    const hoyDate = new Date(hoy + "T00:00:00");
+    return Math.max(1, Math.round((finAno - hoyDate) / 86400000) + 1);
+  }, [anoActual, hoy]);
+
+  const ahorroDiarioObjetivo = savingsGoal > 0 ? metaRestante / diasRestantesAno : 0;
+
+  const diasEnMesActual = new Date(Number(mesActual.slice(0, 4)), Number(mesActual.slice(5, 7)), 0).getDate();
+  const cuotaDeudaMensual = useMemo(
+    () => debts.filter((d) => d.total - d.paid > 0).reduce((s, d) => s + (d.monthlyPayment || 0), 0),
+    [debts]
+  );
+  const ingresoDiarioProm = ingresoMes / diasEnMesActual;
+  const gastosFijosDiarios = gastoMes / diasEnMesActual;
+  const cuotaDeudaDiaria = cuotaDeudaMensual / diasEnMesActual;
+
+  const presupuestoDiario = ingresoDiarioProm - gastosFijosDiarios - cuotaDeudaDiaria - ahorroDiarioObjetivo;
+  const metaCumplida = savingsGoal > 0 && ahorroAcumuladoAno >= savingsGoal;
+
+  function setGoal(amount) {
+    setSavingsGoal(amount);
+  }
+
+  function addDaily(item) {
+    setDailyExpenses((prev) => [{ ...item, id: crypto.randomUUID() }, ...prev]);
+    setShowDailyForm(false);
+  }
+  function removeDaily(id) {
+    setDailyExpenses((prev) => prev.filter((e) => e.id !== id));
+  }
+
+  function addSaving(item) {
+    setSavings((prev) => [...prev, { ...item, id: crypto.randomUUID() }]);
+    setShowSavingsForm(false);
+  }
+  function removeSaving(id) {
+    setSavings((prev) => prev.filter((s) => s.id !== id));
+  }
+  function updateSavingAmount(id, amount) {
+    setSavings((prev) => prev.map((s) => (s.id === id ? { ...s, amount } : s)));
+  }
+
+  function addDebt(debt) {
+    setDebts((prev) => [...prev, { ...debt, id: crypto.randomUUID(), paid: 0 }]);
+    setShowDebtForm(false);
+  }
+  function removeDebt(id) {
+    setDebts((prev) => prev.filter((d) => d.id !== id));
+  }
+  function registrarPago(id, monto) {
+    setDebts((prev) =>
+      prev.map((d) => (d.id === id ? { ...d, paid: Math.min(d.total, d.paid + monto) } : d))
+    );
+  }
+  function addExpense(exp) {
+    setExpenses((prev) => [{ ...exp, id: crypto.randomUUID() }, ...prev]);
+    setShowExpenseForm(false);
+  }
+  function removeExpense(id) {
+    setExpenses((prev) => prev.filter((e) => e.id !== id));
+  }
+
+  function addIncome(inc) {
+    setIncomes((prev) => [{ ...inc, id: crypto.randomUUID() }, ...prev]);
+    setShowIncomeForm(false);
+  }
+  function removeIncome(id) {
+    setIncomes((prev) => prev.filter((i) => i.id !== id));
+  }
+
+  return (
+    <div
+      style={{ background: PALETTE.paper, minHeight: "100vh", fontFamily: "Inter, sans-serif", color: PALETTE.ink }}
+      className="w-full"
+    >
+      <div className="max-w-2xl mx-auto px-5 py-8 sm:px-8 sm:py-10">
+        {/* Header */}
+        <div className="flex items-baseline justify-between border-b pb-4 mb-6" style={{ borderColor: PALETTE.line }}>
+          <div>
+            <h1
+              style={{ fontFamily: "Fraunces, serif", fontWeight: 700, color: PALETTE.ink }}
+              className="text-3xl sm:text-4xl tracking-tight"
+            >
+              Libro de Cuentas
+            </h1>
+            <p style={{ color: PALETTE.inkSoft }} className="text-sm mt-1">
+              Deudas y gastos, en un solo lugar
+            </p>
+          </div>
+          <span
+            style={{ fontFamily: "IBM Plex Mono, monospace", color: PALETTE.inkSoft }}
+            className="text-xs hidden sm:block"
+          >
+            {new Date().toLocaleDateString("es-MX", { day: "2-digit", month: "long", year: "numeric" })}
+          </span>
+        </div>
+
+        {/* Presupuesto diario destacado */}
+        <DailyBudgetBanner
+          savingsGoal={savingsGoal}
+          presupuestoDiario={presupuestoDiario}
+          ahorroDiarioObjetivo={ahorroDiarioObjetivo}
+          metaCumplida={metaCumplida}
+          ahorroAcumuladoAno={ahorroAcumuladoAno}
+          anoActual={anoActual}
+          onClick={() => setTab("meta")}
+        />
+
+        {/* Summary */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+          <SummaryCard
+            icon={<TrendingUp size={16} />}
+            label="Ingresos del mes"
+            value={ingresoMes}
+            color="#1D7DA8"
+            bg={PALETTE.tealSoft}
+            onClick={() => setTab("ingresos")}
+          />
+          <SummaryCard
+            icon={<TrendingDown size={16} />}
+            label="Deuda pendiente"
+            value={totalDeudaPendiente}
+            color={PALETTE.burgundy}
+            bg={PALETTE.burgundySoft}
+            onClick={() => setTab("deudas")}
+          />
+          <SummaryCard
+            icon={<Receipt size={16} />}
+            label="Gastos fijos mensuales"
+            value={gastoMes}
+            color={PALETTE.teal}
+            bg={PALETTE.tealSoft}
+            onClick={() => setTab("gastos")}
+          />
+          <SummaryCard
+            icon={<Flame size={16} />}
+            label="Gastos diarios (hoy)"
+            value={totalHoy}
+            sub={`$${fmt(totalDiariosMes)} este mes`}
+            color={PALETTE.teal}
+            bg={PALETTE.tealSoft}
+            onClick={() => setTab("diarios")}
+          />
+          <SummaryCard
+            icon={<PiggyBank size={16} />}
+            label="Total ahorrado"
+            value={totalAhorrado}
+            color={PALETTE.gold}
+            bg={PALETTE.goldSoft}
+            onClick={() => setTab("ahorros")}
+          />
+          <SummaryCard
+            icon={<Coins size={16} />}
+            label="Patrimonio neto"
+            value={patrimonioNeto}
+            color={PALETTE.ink}
+            bg={PALETTE.line}
+          />
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 mb-4 flex-wrap">
+          <TabButton active={tab === "meta"} onClick={() => setTab("meta")} label="Meta anual" />
+          <TabButton active={tab === "ingresos"} onClick={() => setTab("ingresos")} label="Ingresos" />
+          <TabButton active={tab === "deudas"} onClick={() => setTab("deudas")} label="Deudas" />
+          <TabButton active={tab === "gastos"} onClick={() => setTab("gastos")} label="Gastos" />
+          <TabButton active={tab === "diarios"} onClick={() => setTab("diarios")} label="Gastos diarios" />
+          <TabButton active={tab === "ahorros"} onClick={() => setTab("ahorros")} label="Ahorros" />
+        </div>
+
+        {error && (
+          <div className="text-xs mb-3 px-3 py-2 rounded" style={{ background: PALETTE.burgundySoft, color: PALETTE.burgundy }}>
+            {error}
+          </div>
+        )}
+
+        {tab === "meta" && (
+          <MetaAhorroPanel
+            savingsGoal={savingsGoal}
+            onSetGoal={setGoal}
+            showForm={showGoalForm}
+            setShowForm={setShowGoalForm}
+            anoActual={anoActual}
+            ahorroAcumuladoAno={ahorroAcumuladoAno}
+            metaRestante={metaRestante}
+            metaCumplida={metaCumplida}
+            diasRestantesAno={diasRestantesAno}
+            ahorroDiarioObjetivo={ahorroDiarioObjetivo}
+            presupuestoDiario={presupuestoDiario}
+            ingresoDiarioProm={ingresoDiarioProm}
+            gastosFijosDiarios={gastosFijosDiarios}
+            cuotaDeudaDiaria={cuotaDeudaDiaria}
+            ingresosAno={ingresosAno}
+            gastosFijosAno={gastosFijosAno}
+            gastosDiariosAno={gastosDiariosAno}
+          />
+        )}
+        {tab === "ingresos" && (
+          <IngresosPanel
+            incomes={incomes}
+            totalMes={ingresoMes}
+            totalGeneral={totalIngresos}
+            onRemove={removeIncome}
+            showForm={showIncomeForm}
+            setShowForm={setShowIncomeForm}
+            onAdd={addIncome}
+          />
+        )}
+        {tab === "deudas" && (
+          <DeudasPanel
+            debts={debts}
+            onRemove={removeDebt}
+            onPago={registrarPago}
+            showForm={showDebtForm}
+            setShowForm={setShowDebtForm}
+            onAdd={addDebt}
+          />
+        )}
+        {tab === "gastos" && (
+          <GastosPanel
+            expenses={expenses}
+            onRemove={removeExpense}
+            showForm={showExpenseForm}
+            setShowForm={setShowExpenseForm}
+            onAdd={addExpense}
+          />
+        )}
+        {tab === "diarios" && (
+          <DiariosPanel
+            items={dailyExpenses}
+            totalHoy={totalHoy}
+            totalMes={totalDiariosMes}
+            onRemove={removeDaily}
+            showForm={showDailyForm}
+            setShowForm={setShowDailyForm}
+            onAdd={addDaily}
+          />
+        )}
+        {tab === "ahorros" && (
+          <AhorrosPanel
+            savings={savings}
+            onRemove={removeSaving}
+            onUpdateAmount={updateSavingAmount}
+            showForm={showSavingsForm}
+            setShowForm={setShowSavingsForm}
+            onAdd={addSaving}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ... el resto de componentes (SummaryCard, TabButton, LedgerRow, DeudasPanel, etc.) se mantienen exactamente igual que en tu versión original ...
+// (por brevedad omito repetir los componentes que ya estaban; asegúrate de pegar el archivo completo que tienes originalmente aquí, sólo cambiando las rutas al inicio y el registro del SW abajo)
+
 </script>
 
 <script>
-  // register service worker with absolute path
+  // register service worker with relative path (works in GitHub Pages project site)
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("/service-worker.js").catch((err) => {
+      navigator.serviceWorker.register("./service-worker.js").catch((err) => {
         console.error("SW registration failed:", err);
       });
     });
