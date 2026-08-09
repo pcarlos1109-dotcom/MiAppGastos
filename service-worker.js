@@ -1,34 +1,7 @@
-const CACHE_NAME = "libro-cuentas-v2";
-const ASSETS = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
+const CACHE_NAME = "libro-cuentas-v2"; const ASSETS = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).catch(() => {})
-  );
-  self.skipWaiting();
-});
+self.addEventListener("install", (event) => { event.waitUntil((async () => { const cache = await caches.open(CACHE_NAME); // Intentamos cachear cada recurso individualmente para no romper la instalación const results = await Promise.allSettled( ASSETS.map(async (url) => { try { // Fuerza petición nueva para evitar responder con cache inválido const res = await fetch(url, { cache: "no-cache" }); if (!res.ok) throw new Error(${res.status} ${res.statusText}); await cache.put(url, res.clone()); return { url, ok: true }; } catch (err) { // No abortamos; solo lo registramos para debug console.warn("SW: asset failed to cache:", url, err); return { url, ok: false, err: String(err) }; } }) ); // Opcional: escribir resumen en consola const failed = results.filter(r => r.status === "fulfilled" && r.value && r.value.ok === false); if (failed.length) { console.warn("SW: some assets failed to cache during install:", failed.map(f => f.value.url)); } })()); self.skipWaiting(); });
 
-self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
-  );
-  self.clients.claim();
-});
+self.addEventListener("activate", (event) => { event.waitUntil( caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))) ) ); self.clients.claim(); });
 
-self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") return;
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
-          return response;
-        })
-        .catch(() => cached);
-    })
-  );
-});
+self.addEventListener("fetch", (event) => { if (event.request.method !== "GET") return; event.respondWith( caches.match(event.request).then((cached) => { if (cached) return cached; return fetch(event.request) .then((response) => { // opcional: sólo cachear respuestas con status 200 if (response && response.ok) { const copy = response.clone(); caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {}); } return response; }) .catch(() => cached); }) ); });
